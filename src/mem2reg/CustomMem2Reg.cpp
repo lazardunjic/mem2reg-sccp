@@ -138,6 +138,61 @@ namespace {
                     continue;
                 }
 
+                if (CustomPhi && stores.size() == 2) {
+                    StoreInst *s1 = stores[0];
+                    StoreInst *s2 = stores[1];
+                    BasicBlock *b1 = s1->getParent();
+                    BasicBlock *b2 = s2->getParent();
+
+                    BasicBlock *merge = findTwoPredMerge(b1, b2);
+                    if (!merge)
+                        continue;  // nije čist diamond -> ostavi alloca
+
+                    Value *v1 = s1->getValueOperand();
+                    Value *v2 = s2->getValueOperand();
+
+                    // jedan φ na vrhu merge bloka (posle eventualnih postojećih φ)
+                    PHINode *phi = PHINode::Create(ai->getAllocatedType(), 2, "",
+                                                merge->getFirstNonPHI());
+                    phi->addIncoming(v1, b1);
+                    phi->addIncoming(v2, b2);
+
+                    // rutiraj svaki load preko dominacije
+                    bool allCovered = true;
+                    std::vector<std::pair<LoadInst *, Value *>> repl;
+                    for (LoadInst *li : loads) {
+                        if (domTree.dominates(s1, li))
+                            repl.push_back({li, v1});      // load u then-grani
+                        else if (domTree.dominates(s2, li))
+                            repl.push_back({li, v2});      // load u else-grani
+                        else if (domTree.dominates(phi, li))
+                            repl.push_back({li, phi});     // load u/iza merge bloka
+                        else {
+                            allCovered = false;            // load koji ne umemo da pokrijemo
+                            break;
+                        }
+                    }
+
+                    if (!allCovered) {
+                        phi->eraseFromParent();            // poništi, ne diramo alloca
+                        continue;
+                    }
+
+                    for (auto &pr : repl) {
+                        pr.first->replaceAllUsesWith(pr.second);
+                        pr.first->eraseFromParent();
+                    }
+                    s1->eraseFromParent();
+                    s2->eraseFromParent();
+                    ai->eraseFromParent();
+
+                    if (CustomVerbose)
+                        errs() << "  [diamond-phi] promoted\n";
+
+                    changed = true;
+                    continue;
+                }
+
                 if (stores.size() == 1) {
                     StoreInst *onlyStore = stores[0];
                     Value *storedVal = onlyStore->getValueOperand();
