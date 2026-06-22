@@ -32,9 +32,9 @@ for src in "${tests[@]}"; do
     # generiši IR (disable-O0-optnone da pass sme da radi nad -O0 izlazom)
     "$CLANG" -S -emit-llvm -Xclang -disable-O0-optnone "$src" -o "$ll"
 
-    # pokreni pass (verbose ide na stderr, transformisani IR u _after.ll)
+    # pokreni pass (-custom-phi uključuje diamond φ; bezopasno za testove bez diamond-a)
     "$OPT" -load "$PASS_SO" -enable-new-pm=0 \
-           -"$PASS_NAME" -custom-verbose -S "$ll" -o "$after"
+           -"$PASS_NAME" -custom-phi -custom-verbose -S "$ll" -o "$after"
 
     # diff (ignoriši prvu liniju ModuleID koja se uvek razlikuje)
     echo "  --- diff (before -> after) ---"
