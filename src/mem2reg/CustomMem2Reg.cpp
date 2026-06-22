@@ -6,6 +6,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h" 
 #include "llvm/Support/CommandLine.h"
+#include "llvm/IR/Dominators.h"
 
 using namespace llvm;
 
@@ -48,6 +49,9 @@ namespace{
         }
 
         bool runOnFunction(Function &F) override {
+            DominatorTree &DomTree = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+            bool changed = false;
+
             std::vector<AllocaInst *> Allocas;
             for(BasicBlock &bb: F){
                 for(Instruction &i: bb){
@@ -75,9 +79,43 @@ namespace{
                         errs() << "  [PROMOTABLE] " << *ai
                                << "  (loads=" << loads.size()
                                << ", stores=" << stores.size() << ")\n";
+
+                if (stores.size() == 1) {
+                    StoreInst *OnlyStore = stores[0];
+                    Value *StoredVal = OnlyStore->getValueOperand();
+
+                    bool AllDominated = true;
+                    for (LoadInst *li : loads) {
+                        if (!DomTree.dominates(OnlyStore, li)) {
+                        AllDominated = false;
+                        break;
+                        }
+                    }
+
+                    if (!AllDominated)
+                        continue;
+
+                    for (LoadInst *li : loads) {
+                        li->replaceAllUsesWith(StoredVal);
+                        li->eraseFromParent();
+                    }
+                    
+                    OnlyStore->eraseFromParent();
+                    ai->eraseFromParent();
+
+                    if (CustomVerbose)
+                        errs() << "  [single-store] promoted\n";
+                    
+                    changed = true;
+                    continue;
+                }
             }
                     
-            return false;
+            return changed;
+        }
+
+        void getAnalysisUsage(AnalysisUsage &au) const override {
+            au.addRequired<DominatorTreeWrapperPass>();
         }
     };
 }
