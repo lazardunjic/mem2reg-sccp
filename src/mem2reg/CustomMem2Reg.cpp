@@ -8,11 +8,19 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Constants.h"
+#include <utility>
+#include "llvm/IR/CFG.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 using namespace llvm;
 
 static cl::opt<bool> CustomVerbose(
     "custom-verbose", cl::desc("Print logs for analyzed allocas"),
+    cl::init(false));
+
+//dodat phi
+static cl::opt<bool> CustomPhi(
+    "custom-phi", cl::desc("Enable restricted diamond phi insertion"),
     cl::init(false));
 
 namespace {
@@ -48,6 +56,22 @@ namespace {
             }
 
             return true;
+        }
+
+        //proveriti
+        static BasicBlock *findTwoPredMerge(BasicBlock *b1, BasicBlock *b2) {
+            if (b1 == b2)
+                return nullptr;
+
+            for (BasicBlock *succ : successors(b1)) {
+                SmallPtrSet<BasicBlock *, 4> preds;
+                for (BasicBlock *p : predecessors(succ))
+                    preds.insert(p);
+
+                if (preds.size() == 2 && preds.count(b1) && preds.count(b2))
+                    return succ;
+            }
+            return nullptr;
         }
 
         bool runOnFunction(Function &F) override {
