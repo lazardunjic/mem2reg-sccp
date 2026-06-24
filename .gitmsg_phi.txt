@@ -1,0 +1,15 @@
+feat(sccp): visit phi cvorova (KORAK 2) [deo D]
+
+visitPHINode: vrednost phi = meet incoming vrednosti CIJE su ulazne ivice
+executable. Ivice iz mrtvih (ne-executable) blokova se ignorisu, pa je rezultat
+precizniji od obicnog constant folding-a:
+  - phi [10,%a],[20,%b] gde je %b mrtav  => const 10 (a ne overdefined)
+  - oba ulaza ista konstanta             => ta konstanta
+  - razlicite konstante na zivim ivicama => overdefined
+
+Rezultat ide kroz updateState (monotono spustanje + guranje korisnika na SSA
+worklist). Pošto solve() pri svakoj novoj ivici ka bloku ponovo obidje sve
+instrukcije tog bloka, phi se re-evaluira kad nova ulazna ivica ozivi.
+
+dump prosiren: pored blokova/ivica ispisuje i lattice vrednost svake
+instrukcije (undef / const X / overdefined) radi verifikacije.

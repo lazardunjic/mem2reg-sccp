@@ -1,0 +1,5 @@
+test(sccp): phi .ll slucajevi (KORAK 2)
+
+- phi_dead_pred:  mrtav predecessor (br i1 true) -> %p = const 10
+- phi_same_const: obe grane zive, isti ulaz       -> %p = const 5
+- phi_overdef:    obe grane zive, razlicit ulaz    -> %p = overdefined

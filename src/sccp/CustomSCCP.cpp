@@ -20,7 +20,7 @@ using namespace llvm;
 
 
 //============================================================================//
-//  [C - Nedeljko]  lattice + solver stanje. NE menjati bez dogovora.
+//  [Nedeljko]  lattice + solver stanje. NE menjati bez dogovora.
 //============================================================================//
 
 struct LatticeValue {
@@ -148,9 +148,8 @@ struct SCCPSolver {
         CFGWorklist.push_back({nullptr, Entry});
     }
 
-    //========================================================================//
-    //  [D - Filip]  control-flow + rewrite. Koristi C-ov lattice/state gore.
-    //========================================================================//
+    //  [Filip]  control-flow + rewrite. Koristi lattice/state gore.
+
 
     // [C TODO] obicna instrukcija (add/sub/mul/icmp/cast...). Dok C ne doda
     // pravi folding, konzervativno -> overdefined.
@@ -186,7 +185,7 @@ struct SCCPSolver {
         }
     }
 
-    // KORAK 1: granu markiramo executable SAMO ako je dostizna.
+    //  granu markiramo executable SAMO ako je dostizna.
     //   const uslov -> jedna grana ; overdefined -> obe ; undef -> nijedna
     void visitTerminator(Instruction *TI) {
         BasicBlock *BB = TI->getParent();
@@ -239,9 +238,26 @@ struct SCCPSolver {
             markEdgeExecutable(BB, Succ);
     }
 
-    // KORAK 2 (TODO): meet samo executable ulaza. Privremeno overdefined.
+    // vrednost phi = meet incoming vrednosti CIJE su ulazne ivice executable. 
+    // Ivice iz mrtvih blokova se ignorisu -> zato je SCCP precizniji od obicnog folding-a
+    // (npr. phi [10,%a],[20,%b] gde je %b mrtav => const 10).
+    
     void visitPHINode(PHINode *PN) {
-        markOverdefined(PN);
+        BasicBlock *PhiBB = PN->getParent();
+
+        LatticeValue Result = LatticeValue::makeUndef();
+        for (unsigned i = 0, e = PN->getNumIncomingValues(); i < e; ++i) {
+            BasicBlock *InBB = PN->getIncomingBlock(i);
+            // Ulaz se racuna samo ako je ulazna ivica InBB -> PhiBB dostizna.
+            if (!isEdgeExecutable(InBB, PhiBB))
+                continue;
+            meet(Result, getValueState(PN->getIncomingValue(i)));
+            if (Result.isOverdefined())
+                break; // ne moze nize, nema potrebe dalje
+        }
+        // updateState meet-uje Result u trenutno stanje (monotono) i,
+        // ako se promenilo, gura korisnike na SSA worklist.
+        updateState(PN, Result);
     }
 
     // KORAK 3 (TODO): constant replace + brisanje mrtvih blokova/ivica.
@@ -261,6 +277,23 @@ struct SCCPSolver {
             for (BasicBlock *Succ : successors(&BB))
                 OS << "    " << BB.getName() << " -> " << Succ->getName() << " : "
                    << (isEdgeExecutable(&BB, Succ) ? "live" : "dead") << "\n";
+        OS << "  -- lattice vrednosti --\n";
+        for (BasicBlock &BB : F)
+            for (Instruction &I : BB) {
+                auto It = ValueState.find(&I);
+                if (It == ValueState.end())
+                    continue;
+                const LatticeValue &LV = It->second;
+                OS << "   " << I << "   =>   ";
+                if (LV.isUndef())
+                    OS << "undef";
+                else if (LV.isConstant()) {
+                    OS << "const ";
+                    LV.getConstant()->printAsOperand(OS, /*PrintType=*/false);
+                } else
+                    OS << "overdefined";
+                OS << "\n";
+            }
     }
 };
 
