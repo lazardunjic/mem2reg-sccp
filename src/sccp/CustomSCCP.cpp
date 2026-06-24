@@ -142,4 +142,127 @@ struct SCCPSolver {
         ExecutableBlocks.insert(Entry);
         CFGWorklist.push_back({nullptr, Entry});
     }
+    
+    void visitBinaryOperator(BinaryOperator *BO) {
+        if (getValueState(BO).isOverdefined())
+            return;
+
+        LatticeValue &LHS = getValueState(BO->getOperand(0));
+        LatticeValue &RHS = getValueState(BO->getOperand(1));
+
+        if (LHS.isOverdefined() || RHS.isOverdefined()) {
+            markOverdefined(BO);
+            return;
+        }
+
+        if (LHS.isConstant() && RHS.isConstant()) {
+            Constant *C = ConstantExpr::get(
+                BO->getOpcode(),
+                LHS.getConstant(),
+                RHS.getConstant()
+            );
+            if (C) {
+                updateState(BO, LatticeValue::makeConstant(C));
+                return;
+            }
+            // Fold nije uspeo (npr. deljenje nulom) -> konzervativno Overdefined
+            markOverdefined(BO);
+            return;
+        }
+    }
+
+    void visitCastInstruction(CastInst *CI) {
+        if (getValueState(CI).isOverdefined())
+            return;
+
+        LatticeValue &Op = getValueState(CI->getOperand(0));
+
+        if (Op.isOverdefined()) {
+            markOverdefined(CI);
+            return;
+        }
+
+        if (Op.isConstant()) {
+            Constant *C = ConstantExpr::getCast(
+                CI->getOpcode(),
+                Op.getConstant(),
+                CI->getType()
+            );
+            if (C) {
+                updateState(CI, LatticeValue::makeConstant(C));
+                return;
+            }
+            markOverdefined(CI);
+            return;
+        }
+        // Operand je Undef -> ostajemo Undef
+    }
+
+    void visitCmpInstruction(CmpInst *Cmp) {
+        if (getValueState(Cmp).isOverdefined())
+            return;
+
+        LatticeValue &LHS = getValueState(Cmp->getOperand(0));
+        LatticeValue &RHS = getValueState(Cmp->getOperand(1));
+
+        if (LHS.isOverdefined() || RHS.isOverdefined()) {
+            markOverdefined(Cmp);
+            return;
+        }
+
+        if (LHS.isConstant() && RHS.isConstant()) {
+            Constant *C = ConstantExpr::getCompare(
+                Cmp->getPredicate(),
+                LHS.getConstant(),
+                RHS.getConstant()
+            );
+            if (C) {
+                updateState(Cmp, LatticeValue::makeConstant(C));
+                return;
+            }
+            markOverdefined(Cmp);
+            return;
+        }
+    }
+
+    void visitInstruction(Instruction *I) {
+        // Nikad ne visitujemo instrukcije u mrtvim blokovima
+        if (!isBlockExecutable(I->getParent()))
+            return;
+
+        if (auto *BO = dyn_cast<BinaryOperator>(I))
+            visitBinaryOperator(BO);
+        else if (auto *CI = dyn_cast<CastInst>(I))
+            visitCastInstruction(CI);
+        else if (auto *Cmp = dyn_cast<CmpInst>(I))
+            visitCmpInstruction(Cmp);
+        // PHINode i BranchInst -> D implementira
+        // Sve ostalo (call, load, store...) -> konzervativno Overdefined
+        else if (!isa<PHINode>(I) && !isa<BranchInst>(I) &&
+                 !isa<ReturnInst>(I) && !isa<UnreachableInst>(I)) {
+            if (!I->getType()->isVoidTy())
+                markOverdefined(I);
+        }
+
+    void solve(Function &F) {
+        initialize(F);
+
+        while (!CFGWorklist.empty() || !SSAWorklist.empty()) {
+
+            // Obradjujemo nove executable blokove
+            while (!CFGWorklist.empty()) {
+                CFGEdge Edge = CFGWorklist.pop_back_val();
+                BasicBlock *BB = Edge.second;
+                for (Instruction &I : *BB)
+                    visitInstruction(&I);
+            }
+
+            // Obradjujemo instrukcije ciji operandi su se promenili
+            while (!SSAWorklist.empty()) {
+                Instruction *I = SSAWorklist.pop_back_val();
+                visitInstruction(I);
+            }
+        }
+    }
+};
 
