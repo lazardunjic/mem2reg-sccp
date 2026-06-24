@@ -266,3 +266,48 @@ struct SCCPSolver {
     }
 };
 
+namespace {
+
+struct CustomSCCP : public FunctionPass {
+    static char ID;
+    CustomSCCP() : FunctionPass(ID) {}
+
+    bool runOnFunction(Function &F) override {
+        SCCPSolver Solver;
+        Solver.solve(F);
+
+        errs() << "=== CustomSCCP: " << F.getName() << " ===\n";
+        for (auto &BB : F) {
+            errs() << BB.getName() << ":\n";
+            for (auto &I : BB) {
+                if (I.getType()->isVoidTy())
+                    continue;
+                auto It = Solver.ValueState.find(&I);
+                if (It == Solver.ValueState.end())
+                    continue;
+                const LatticeValue &LV = It->second;
+                errs() << "  ";
+                I.printAsOperand(errs(), false);
+                errs() << "  ->  ";
+                if (LV.isUndef())
+                    errs() << "Undef\n";
+                else if (LV.isOverdefined())
+                    errs() << "Overdefined\n";
+                else
+                    errs() << "Constant(" << *LV.getConstant() << ")\n";
+            }
+        }
+
+        return false; 
+    }
+
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
+        AU.setPreservesAll(); // skloniti kad D doda rewrite
+    }
+};
+
+}
+
+char CustomSCCP::ID = 0;
+static RegisterPass<CustomSCCP> X("custom-sccp", "Custom SCCP pass");
+
