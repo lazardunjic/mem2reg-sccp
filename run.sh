@@ -1,9 +1,9 @@
 #!/bin/bash
-# Build + pokreni CustomMem2Reg nad svim tests/*.c, prikaži before/after diff.
+# End-to-end pipeline: mem2reg -> SCCP nad svim tests/*.c
 set -e
 
-PASS_SO="build/src/mem2reg/CustomMem2Reg.so"
-PASS_NAME="custom-mem2reg"
+MEM2REG_SO="build/src/mem2reg/CustomMem2Reg.so"
+SCCP_SO="build/src/sccp/CustomSCCP.so"
 CLANG="clang-14"
 OPT="opt-14"
 
@@ -13,7 +13,7 @@ cmake --build build
 
 # 2. prođi kroz sve .c u tests/
 echo ""
-echo "==> testovi"
+echo "==> pipeline (mem2reg -> sccp)"
 shopt -s nullglob
 tests=(tests/*.c)
 if [ ${#tests[@]} -eq 0 ]; then
@@ -22,24 +22,25 @@ if [ ${#tests[@]} -eq 0 ]; then
 fi
 
 for src in "${tests[@]}"; do
-    base="${src%.c}"                # tests/test1
+    base="${src%.c}"
     ll="${base}.ll"
-    after="${base}_after.ll"
+    after="${base}_pipeline.ll"
 
     echo ""
     echo "----- ${src} -----"
 
-    # generiši IR (disable-O0-optnone da pass sme da radi nad -O0 izlazom)
+    # generiši IR
     "$CLANG" -S -emit-llvm -Xclang -disable-O0-optnone "$src" -o "$ll"
 
-    # pokreni pass (-custom-phi uključuje diamond φ; bezopasno za testove bez diamond-a)
-    "$OPT" -load "$PASS_SO" -enable-new-pm=0 \
-           -"$PASS_NAME" -custom-phi -custom-verbose -S "$ll" -o "$after"
+    # oba passa redom: mem2reg (+phi) pa sccp; SCCP dump ide na stderr
+    "$OPT" -load "$MEM2REG_SO" -load "$SCCP_SO" -enable-new-pm=0 \
+           -custom-mem2reg -custom-phi -custom-sccp \
+           -S "$ll" -o "$after"
 
-    # diff (ignoriši prvu liniju ModuleID koja se uvek razlikuje)
-    echo "  --- diff (before -> after) ---"
+    # diff originala i finalnog IR-a (ignoriši ModuleID liniju)
+    echo "  --- diff (before -> after pipeline) ---"
     if diff <(tail -n +2 "$ll") <(tail -n +2 "$after") > /dev/null; then
-        echo "  (bez promena)"
+        echo "  (bez promena u IR-u)"
     else
         diff <(tail -n +2 "$ll") <(tail -n +2 "$after") | sed 's/^/  /' || true
     fi
