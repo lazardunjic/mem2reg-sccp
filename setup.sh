@@ -55,7 +55,7 @@ case "$DISTRO" in
         ;;
     *)
         echo "Unsupported distro: $DISTRO"
-        echo "Install manually: cmake 3.20+, LLVM 17 dev headers, clang 17, ninja"
+        echo "Install manually: cmake 3.20+, LLVM 14 dev headers, clang 14, ninja"
         exit 1
         ;;
 esac
