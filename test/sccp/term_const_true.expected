@@ -1,0 +1,8 @@
+
+define i32 @const_true() {
+entry:
+  br label %then
+
+then:                                             ; preds = %entry
+  ret i32 1
+}

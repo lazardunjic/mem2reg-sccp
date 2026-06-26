@@ -1,0 +1,14 @@
+
+define i32 @phi_same_const(i1 %c) {
+entry:
+  br i1 %c, label %a, label %b
+
+a:                                                ; preds = %entry
+  br label %m
+
+b:                                                ; preds = %entry
+  br label %m
+
+m:                                                ; preds = %b, %a
+  ret i32 5
+}

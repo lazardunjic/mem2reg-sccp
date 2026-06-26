@@ -1,0 +1,11 @@
+
+define i32 @unknown_cond(i1 %c) {
+entry:
+  br i1 %c, label %then, label %else
+
+then:                                             ; preds = %entry
+  ret i32 1
+
+else:                                             ; preds = %entry
+  ret i32 2
+}

@@ -1,0 +1,11 @@
+
+define i32 @combined() {
+entry:
+  br label %live
+
+live:                                             ; preds = %entry
+  br label %merge
+
+merge:                                            ; preds = %live
+  ret i32 5
+}

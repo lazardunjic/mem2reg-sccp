@@ -1,0 +1,8 @@
+
+define i32 @switch_const() {
+entry:
+  br label %c7
+
+c7:                                               ; preds = %entry
+  ret i32 70
+}

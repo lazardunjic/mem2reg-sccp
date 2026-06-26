@@ -1,0 +1,11 @@
+
+define i32 @phi_dead_pred() {
+entry:
+  br label %a
+
+a:                                                ; preds = %entry
+  br label %m
+
+m:                                                ; preds = %a
+  ret i32 10
+}
