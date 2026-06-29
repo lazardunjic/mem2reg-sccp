@@ -144,9 +144,6 @@ struct SCCPSolver {
         CFGWorklist.push_back({nullptr, Entry});
     }
 
-
-
-    // [Nedeljko] folding obicnih instrukcija (sa grane feature/sccp-lattice)
     void visitBinaryOperator(BinaryOperator *BO) {
         if (getValueState(BO).isOverdefined())
             return;
@@ -165,7 +162,7 @@ struct SCCPSolver {
             if (C)
                 updateState(BO, LatticeValue::makeConstant(C));
             else
-                markOverdefined(BO); // npr. deljenje nulom
+                markOverdefined(BO); 
         }
     }
 
@@ -186,7 +183,6 @@ struct SCCPSolver {
             else
                 markOverdefined(CI);
         }
-        // Operand Undef -> ostajemo Undef
     }
 
     void visitCmpInstruction(CmpInst *Cmp) {
@@ -210,8 +206,6 @@ struct SCCPSolver {
         }
     }
 
-    // Dispatch obicnih (ne-phi, ne-terminator) instrukcija. visit() vec filtrira
-    // phi i terminatore, pa ovde stizu binary/cast/cmp + ostalo (load/call/gep...)
     void visitInstruction(Instruction *I) {
         if (auto *BO = dyn_cast<BinaryOperator>(I))
             visitBinaryOperator(BO);
@@ -220,7 +214,7 @@ struct SCCPSolver {
         else if (auto *Cmp = dyn_cast<CmpInst>(I))
             visitCmpInstruction(Cmp);
         else if (!I->getType()->isVoidTy())
-            markOverdefined(I); // load/call/gep/select... -> konzervativno
+            markOverdefined(I); 
     }
 
     void visit(Instruction &I) {
@@ -232,17 +226,15 @@ struct SCCPSolver {
             visitInstruction(&I);
     }
 
-    // Glavna petlja (edge-based CFG worklist + SSA worklist) do fiksne tacke
     void solve(Function &F) {
         initialize(F);
         while (!CFGWorklist.empty() || !SSAWorklist.empty()) {
-            // nova executable ivica -> obidji instrukcije ciljnog bloka
             while (!CFGWorklist.empty()) {
                 CFGEdge E = CFGWorklist.pop_back_val();
                 for (Instruction &I : *E.second)
                     visit(I);
             }
-            // promenjena vrednost -> re-evaluiraj korisnika (u zivom bloku)
+
             while (!SSAWorklist.empty()) {
                 Instruction *I = SSAWorklist.pop_back_val();
                 if (isBlockExecutable(I->getParent()))
@@ -251,8 +243,6 @@ struct SCCPSolver {
         }
     }
 
-    //  granu markiramo executable SAMO ako je dostizna.
-    //   const uslov -> jedna grana ; overdefined -> obe ; undef -> nijedna
     void visitTerminator(Instruction *TI) {
         BasicBlock *BB = TI->getParent();
 
@@ -263,20 +253,20 @@ struct SCCPSolver {
             }
             LatticeValue Cond = getValueState(BI->getCondition());
             if (Cond.isUndef())
-                return; // uslov jos nepoznat -> ne markiraj nista (cekaj)
+                return; 
             if (Cond.isOverdefined()) {
                 markEdgeExecutable(BB, BI->getSuccessor(0));
                 markEdgeExecutable(BB, BI->getSuccessor(1));
                 return;
             }
-            // Constant: tacno jedna grana je ziva
+
             auto *CI = dyn_cast<ConstantInt>(Cond.getConstant());
-            if (!CI) { // npr. ConstantExpr -> konzervativno obe
+            if (!CI) { 
                 markEdgeExecutable(BB, BI->getSuccessor(0));
                 markEdgeExecutable(BB, BI->getSuccessor(1));
                 return;
             }
-            // br i1: successor(0)=true grana, successor(1)=false grana
+
             BasicBlock *Live =
                 CI->isZero() ? BI->getSuccessor(1) : BI->getSuccessor(0);
             markEdgeExecutable(BB, Live);
@@ -293,48 +283,34 @@ struct SCCPSolver {
                     return;
                 }
             }
-            // overdefined / nepoznat oblik -> svi successor-i
+
             for (BasicBlock *Succ : successors(BB))
                 markEdgeExecutable(BB, Succ);
             return;
         }
 
-        // ret / unreachable nemaju successor-e; ostalo konzervativno svi
         for (BasicBlock *Succ : successors(BB))
             markEdgeExecutable(BB, Succ);
     }
 
-    // vrednost phi = meet incoming vrednosti CIJE su ulazne ivice executable
-    // Ivice iz mrtvih blokova se ignorisu -> zato je SCCP precizniji od obicnog folding-a
-    // (npr. phi [10,%a],[20,%b] gde je %b mrtav => const 10)
-    
     void visitPHINode(PHINode *PN) {
         BasicBlock *PhiBB = PN->getParent();
 
         LatticeValue Result = LatticeValue::makeUndef();
         for (unsigned i = 0, e = PN->getNumIncomingValues(); i < e; ++i) {
             BasicBlock *InBB = PN->getIncomingBlock(i);
-            // Ulaz se racuna samo ako je ulazna ivica InBB -> PhiBB dostizna
             if (!isEdgeExecutable(InBB, PhiBB))
                 continue;
             meet(Result, getValueState(PN->getIncomingValue(i)));
             if (Result.isOverdefined())
-                break; // ne moze nize, nema potrebe dalje
+                break; 
         }
-        // updateState meet-uje Result u trenutno stanje (monotono) i,
-        // ako se promenilo, gura korisnike na SSA worklist
         updateState(PN, Result);
     }
 
-    // KORAK 3: primeni rezultate analize na IR
-    //   (1) instrukcije sa Constant lattice -> zameni konstantom
-    //   (2) terminatori sa mrtvim izlaznim ivicama -> bezuslovni skok
-    //   (3) unreachable blokovi -> obrisi
     bool rewrite(Function &F) {
         bool Changed = false;
 
-        // (1) Zameni instrukcije cija je lattice vrednost konstanta
-        //     Samo u zivim blokovima; preskoci terminatore, void i vec-konstante
         SmallVector<Instruction *, 32> ToErase;
         for (BasicBlock &BB : F) {
             if (!isBlockExecutable(&BB))
@@ -350,13 +326,9 @@ struct SCCPSolver {
                 Changed = true;
             }
         }
-        // RAUW je uklonio sve upotrebe -> sad je bezbedno obrisati
         for (Instruction *I : ToErase)
             I->eraseFromParent();
 
-        // (2) Pojednostavi terminatore zivih blokova: ako je tacno jedan izlaz
-        //     dostizan, pretvori u bezuslovni skok i otkaci mrtve successore
-        //     (removePredecessor sredi njihove phi-jeve)
         for (BasicBlock &BB : F) {
             if (!isBlockExecutable(&BB))
                 continue;
@@ -367,12 +339,12 @@ struct SCCPSolver {
             SmallPtrSet<BasicBlock *, 4> Live, Dead;
             for (BasicBlock *S : successors(&BB))
                 (isEdgeExecutable(&BB, S) ? Live : Dead).insert(S);
-            // Live skup ne sadrzi blokove koji su i u Dead (isti blok preko vise ivica)
-            for (BasicBlock *S : Live)
+     
+                for (BasicBlock *S : Live)
                 Dead.erase(S);
 
             if (Live.size() != 1 || Dead.empty())
-                continue; // ostavi kako jeste (obe grane zive, ili nista dostizno)
+                continue; 
 
             BasicBlock *LiveSucc = *Live.begin();
             for (BasicBlock *D : Dead)
@@ -382,19 +354,16 @@ struct SCCPSolver {
             Changed = true;
         }
 
-        // (3) Obrisi unreachable blokove.
         SmallVector<BasicBlock *, 16> DeadBlocks;
         for (BasicBlock &BB : F)
             if (!isBlockExecutable(&BB))
                 DeadBlocks.push_back(&BB);
 
-        // Prvo otkaci mrtve blokove kao predecessor-e zivih (sredi phi-jeve)
         for (BasicBlock *BB : DeadBlocks)
             for (BasicBlock *S : successors(BB))
                 if (isBlockExecutable(S))
                     S->removePredecessor(BB);
 
-        // Onda razresi reference i obrisi
         for (BasicBlock *BB : DeadBlocks)
             BB->dropAllReferences();
         for (BasicBlock *BB : DeadBlocks) {
@@ -405,7 +374,6 @@ struct SCCPSolver {
         return Changed;
     }
 
-    // koji su blokovi/ivice executable nakon solve()
     void dump(Function &F, raw_ostream &OS) const {
         OS << "=== SCCP rezultat za @" << F.getName() << " ===\n";
         for (BasicBlock &BB : F)
@@ -436,9 +404,6 @@ struct SCCPSolver {
             }
     }
 };
-
-
-//  Legacy FunctionPass + registracija (-custom-sccp)
 
 static cl::opt<bool>
     Verbose("custom-sccp-verbose",

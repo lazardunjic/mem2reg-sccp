@@ -1,4 +1,5 @@
 #include <vector>
+#include <utility>
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Function.h"
@@ -8,7 +9,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Constants.h"
-#include <utility>
 #include "llvm/IR/CFG.h"
 #include "llvm/ADT/SmallPtrSet.h"
 
@@ -18,7 +18,6 @@ static cl::opt<bool> CustomVerbose(
     "custom-verbose", cl::desc("Print logs for analyzed allocas"),
     cl::init(false));
 
-//dodat phi
 static cl::opt<bool> CustomPhi(
     "custom-phi", cl::desc("Enable restricted diamond phi insertion"),
     cl::init(false));
@@ -58,7 +57,6 @@ namespace {
             return true;
         }
 
-        //proveriti
         static BasicBlock *findTwoPredMerge(BasicBlock *b1, BasicBlock *b2) {
             if (b1 == b2)
                 return nullptr;
@@ -109,7 +107,6 @@ namespace {
                            << "  (loads=" << loads.size()
                            << ", stores=" << stores.size() << ")\n";
 
-                // zero-store: nema store-ova -> load-ovi su undef
                 if (stores.empty()) {
                     for (LoadInst *li : loads) {
                         li->replaceAllUsesWith(UndefValue::get(li->getType()));
@@ -146,35 +143,33 @@ namespace {
 
                     BasicBlock *merge = findTwoPredMerge(b1, b2);
                     if (!merge)
-                        continue;  // nije čist diamond -> ostavi alloca
+                        continue;
 
                     Value *v1 = s1->getValueOperand();
                     Value *v2 = s2->getValueOperand();
 
-                    // jedan φ na vrhu merge bloka (posle eventualnih postojećih φ)
                     PHINode *phi = PHINode::Create(ai->getAllocatedType(), 2, "",
                                                 merge->getFirstNonPHI());
                     phi->addIncoming(v1, b1);
                     phi->addIncoming(v2, b2);
 
-                    // rutiraj svaki load preko dominacije
                     bool allCovered = true;
                     std::vector<std::pair<LoadInst *, Value *>> repl;
                     for (LoadInst *li : loads) {
                         if (domTree.dominates(s1, li))
-                            repl.push_back({li, v1});      // load u then-grani
+                            repl.push_back({li, v1});
                         else if (domTree.dominates(s2, li))
-                            repl.push_back({li, v2});      // load u else-grani
+                            repl.push_back({li, v2});
                         else if (domTree.dominates(phi, li))
-                            repl.push_back({li, phi});     // load u/iza merge bloka
+                            repl.push_back({li, phi});
                         else {
-                            allCovered = false;            // load koji ne umemo da pokrijemo
+                            allCovered = false;
                             break;
                         }
                     }
 
                     if (!allCovered) {
-                        phi->eraseFromParent();            // poništi, ne diramo alloca
+                        phi->eraseFromParent();
                         continue;
                     }
 
@@ -212,7 +207,7 @@ namespace {
                         li->replaceAllUsesWith(storedVal);
                         li->eraseFromParent();
                     }
-
+                    
                     onlyStore->eraseFromParent();
                     ai->eraseFromParent();
 
